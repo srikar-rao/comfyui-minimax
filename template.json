@@ -1,5 +1,5 @@
 {
-  "template_repo": "https://github.com/Hearmeman24/comfyui-minimax.git",
+  "template_repo": "https://github.com/srikar-rao/comfyui-minimax.git",
   "branch": "master",
   "provisioning_mode": "walk",
   "auto_download": [
