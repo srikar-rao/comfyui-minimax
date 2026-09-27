@@ -13,10 +13,11 @@ offers to download it to their own PC. It also checks the source workflow
 links and the tuned loader/scheduler defaults before the provisioner rewrites
 copies for another quant profile.
 
-This is also the ONLY gate on template.json's `extra_models` key (the bundled
-Turbo LoRAs and latent upscaler): the runtime validator ignores the key and
-the provisioner only prints an error line at boot, so a typo there is
-invisible everywhere else.
+`download_minimax_h3` installs only
+workflows/minimaxH3ReferenceToVideo8_v10_cached.json and queues that graph's
+models. The other workflow files stay in the repo, but their models are not
+downloaded. The NSFW LoRA named in that graph is listed in auto_download so
+it is neither fetched nor treated as a missing registry model.
 
 Run: python3 tools/test_provisioner.py
 Stdlib only, no pytest. Needs template.json + pins.json in the repo root.
@@ -35,8 +36,16 @@ from validate_models import runtime_dir  # noqa: E402
 
 TEXT_ENCODER = "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
 BF16_MODELS = {
-    "fl2va": "minimax_h3_fl2va_bf16.safetensors",
     "ref2va": "minimax_h3_ref2va_bf16.safetensors",
+}
+CACHED_WORKFLOW = "minimaxH3ReferenceToVideo8_v10_cached.json"
+IGNORED_LORA = "HMNSFW-AIO-V2.5.safetensors"
+# Models the cached graph loads that are not quant-swapped.
+CACHED_STATIC_MODELS = {
+    "minimax_h3_audio_vae_fp32.safetensors",
+    "minimax_h3_video_vae_fp16.safetensors",
+    "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+    "taeh3.safetensors",
 }
 
 # The refreshed workflows use the two 8-step 768p builds. The 4-step v1.2
@@ -76,18 +85,10 @@ HYPERFLOW_NODE_URL = (
     "2cea953918c1f800e4d6d15304d65947b220ddc7/"
     + HYPERFLOW_NODE_WEIGHT
 )
-HYPERFLOW_BY_PROFILE = {
-    "int8": HYPERFLOW_PRUNED,
-    "fp8": HYPERFLOW_PRUNED,
-    "nvfp4": HYPERFLOW_PRUNED,
-    "false": HYPERFLOW_FULL,
-    "bf16": HYPERFLOW_FULL,
-}
 HYPERFLOW_URL_BASE = (
     "https://huggingface.co/drbaph/MiniMax-H3-Turbo-Lora-ComfyUI/resolve/"
     "bb2bc497cbaca89dadd0bcf1856eed4f8275be20/"
 )
-EXTRA_MODELS = BUNDLED_LORAS + [LATENT_UPSCALER]
 FL2VA_INT8 = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 REF2VA_INT8 = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
 FL2VA_TURBO_8STEP = (
@@ -392,6 +393,20 @@ def assert_source_workflows(registry: dict) -> None:
     print("✅ five refreshed workflows use the int8 defaults and 8-step Turbo")
     print("✅ five upscaling workflows use the pinned 2x latent upscaler")
 
+    cached = load_json(REPO / "workflows" / CACHED_WORKFLOW, "cached workflow")
+    unets = [node for node in cached["nodes"] if node.get("type") == "UNETLoader"]
+    clips = [node for node in cached["nodes"] if node.get("type") == "CLIPLoader"]
+    assert len(unets) == 1 and len(clips) == 1
+    assert unets[0]["widgets_values"][0] == REF2VA_INT8
+    assert unets[0]["properties"]["models"][0]["name"] == REF2VA_INT8
+    assert clips[0]["widgets_values"][0] == TEXT_ENCODER
+    assert clips[0]["properties"]["models"][0]["name"] == TEXT_ENCODER
+    cached_text = (REPO / "workflows" / CACHED_WORKFLOW).read_text()
+    assert "minimax_h3_fl2va_" not in cached_text
+    assert "nvfp4_awq" not in cached_text
+    assert IGNORED_LORA in cached_text
+    print("✅ cached reference-to-video workflow loads Ref2VA and the int8 encoder")
+
 
 def main() -> int:
     template = load_json(REPO / "template.json",
@@ -408,14 +423,14 @@ def main() -> int:
     assert group["default"] == "int8", group["default"]
     profiles = group["profiles"]
     assert set(profiles) == {"int8", "fp8", "nvfp4", "false", "bf16"}, profiles
+    for profile in profiles.values():
+        assert set(profile) == {"ref2va", "text_encoder"}, profile
     quantized = {
         p[role] for p in profiles.values()
-        for role in ("fl2va", "ref2va", "text_encoder")
+        for role in ("ref2va", "text_encoder")
     }
     diffusion_models = {
-        profile[role]
-        for profile in profiles.values()
-        for role in ("fl2va", "ref2va")
+        profile["ref2va"] for profile in profiles.values()
     }
 
     assert {role: profiles["false"][role] for role in BF16_MODELS} == (
@@ -429,7 +444,7 @@ def main() -> int:
             "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/"
             f"diffusion_models/{basename}"
         ), f"{role}: unexpected bf16 URL {registry[basename]['url']}"
-    print("✅ bf16 profile points at the two requested Comfy-Org models")
+    print("✅ bf16 profile points at the Ref2VA Comfy-Org model")
 
     # The DiT quant varies by card. The text encoder does not: every profile
     # ships Comfy-Org's stock int8 build, so no quant can pull a second
@@ -444,9 +459,9 @@ def main() -> int:
     assert not strays, f"registry carries unused text encoders: {sorted(strays)}"
     print(f"✅ every model profile loads {TEXT_ENCODER}")
 
-    for quant, basename in HYPERFLOW_BY_PROFILE.items():
-        assert profiles[quant]["hyperflow"] == basename, (
-            f"{quant}: HyperFlow must match the selected base layout"
+    for quant, profile in profiles.items():
+        assert "hyperflow" not in profile and "hyperflow_node" not in profile, (
+            f"{quant}: HyperFlow weights must not be queued for this workflow"
         )
     for basename in (HYPERFLOW_FULL, HYPERFLOW_PRUNED):
         assert registry[basename] == {
@@ -459,12 +474,9 @@ def main() -> int:
         "subdir": "hyperflow",
         "min_size_mb": 3700,
     }, "node-specific HyperFlow weight must go in models/hyperflow"
-    for quant in ("false", "bf16"):
-        assert profiles[quant]["hyperflow_node"] == HYPERFLOW_NODE_WEIGHT, (
-            f"{quant}: full base must queue the node-specific weight")
-    for quant in ("int8", "fp8", "nvfp4"):
-        assert "hyperflow_node" not in profiles[quant], (
-            f"{quant}: pruned base must not queue the full node weight")
+    assert "hyperflow_node" not in {
+        role for profile in profiles.values() for role in profile
+    }, "node-specific HyperFlow weight must not be a selected profile file"
     assert all(
         basename not in workflow.read_text()
         for workflow in (REPO / "workflows").rglob("*.json")
@@ -498,12 +510,13 @@ def main() -> int:
         "subdir": "latent_upscale_models",
         "min_size_mb": 650,
     }, f"unexpected latent upscaler registry entry: {registry[LATENT_UPSCALER]}"
-    assert sorted(flag.get("extra_models", [])) == sorted(EXTRA_MODELS), (
-        f"extra_models must list exactly the {len(EXTRA_MODELS)} bundled "
-        f"models, got {flag.get('extra_models')}"
+    assert flag.get("workflows") == [CACHED_WORKFLOW], flag.get("workflows")
+    assert not flag.get("folders"), flag.get("folders")
+    assert not flag.get("extra_models"), flag.get("extra_models")
+    assert template.get("auto_download") == [IGNORED_LORA], (
+        template.get("auto_download")
     )
-    print(f"✅ {len(TURBO_LORAS)} turbo LoRAs registered, "
-          f"{len(BUNDLED_LORAS)} bundled via extra_models")
+    print("✅ download_minimax_h3 provisions only the cached reference workflow")
 
     custom_nodes = template["custom_nodes"]
     assert custom_nodes["target"] == "image", custom_nodes
@@ -598,99 +611,52 @@ def main() -> int:
                 f"{proc.stdout}\n{proc.stderr}"
             )
             lines = [l for l in manifest.read_text().splitlines() if l]
-            deployed_upscalers = {
-                path.name
-                for path in (dst / "MiniMax H3" / "Upscaling").glob("*.json")
-            }
-            assert deployed_upscalers == UPSCALING_WORKFLOWS, (
-                f"{label}: deployed upscaling workflows are "
-                f"{sorted(deployed_upscalers)}, expected "
-                f"{sorted(UPSCALING_WORKFLOWS)}"
+            copied = sorted(
+                path.relative_to(dst).as_posix()
+                for path in dst.rglob("*.json")
             )
-            for relative in REFMOD_WORKFLOWS:
-                assert (dst / "MiniMax H3" / relative).is_file(), f"{label}: missing {relative}"
+            assert copied == [CACHED_WORKFLOW], (
+                f"{label}: copied {copied}, expected only {CACHED_WORKFLOW}"
+            )
             downloaded = {l.split("\t")[1].rsplit("/", 1)[1] for l in lines}
-            destinations = {
-                Path(line.split("\t")[1]).name:
-                    Path(line.split("\t")[1])
-                for line in lines
-            }
             manifests[label] = {l.split("\t", 1)[0] for l in lines}
 
             wanted = {
-                profiles[key][role]
-                for role in ("fl2va", "ref2va", "text_encoder")
+                profiles[key]["ref2va"],
+                profiles[key]["text_encoder"],
             }
             got = declared(dst, quantized, registry)
             assert got == wanted, (
                 f"{label}: workflows declare {sorted(got)}, "
                 f"selected profile {key!r} is {sorted(wanted)}"
             )
-            assert wanted <= downloaded, (
-                f"{label}: profile files missing from manifest: "
-                f"{sorted(wanted - downloaded)}"
+            expected = wanted | CACHED_STATIC_MODELS
+            assert downloaded == expected, (
+                f"{label}: manifest is {sorted(downloaded)}, "
+                f"expected {sorted(expected)}"
             )
-            selected_diffusion = downloaded & diffusion_models
-            wanted_diffusion = {
-                profiles[key]["fl2va"], profiles[key]["ref2va"]
-            }
-            assert selected_diffusion == wanted_diffusion, (
-                f"{label}: queued diffusion files {sorted(selected_diffusion)}, "
-                f"expected only {sorted(wanted_diffusion)}"
+            assert downloaded & diffusion_models == {profiles[key]["ref2va"]}
+            assert IGNORED_LORA not in downloaded, (
+                f"{label}: ignored NSFW LoRA was queued"
             )
-            assert set(TURBO_LORAS) <= downloaded, (
-                f"{label}: turbo LoRAs missing from manifest: "
-                f"{sorted(set(TURBO_LORAS) - downloaded)}"
+            skipped_families = {
+                HYPERFLOW_FULL, HYPERFLOW_PRUNED, HYPERFLOW_NODE_WEIGHT,
+                LATENT_UPSCALER, *BUNDLED_LORAS,
+            } - {REF2VA_TURBO_8STEP}
+            assert not downloaded & skipped_families, (
+                f"{label}: queued models this workflow does not load: "
+                f"{sorted(downloaded & skipped_families)}"
             )
-            selected_hyperflow = HYPERFLOW_BY_PROFILE[key]
-            assert downloaded & {HYPERFLOW_FULL, HYPERFLOW_PRUNED} == {
-                selected_hyperflow
-            }, f"{label}: queued the wrong HyperFlow variant"
-            assert destinations[selected_hyperflow] == (
-                tmp / f"models-{slug}" / "loras" / selected_hyperflow
-            ), f"{label}: HyperFlow destination must be models/loras"
-            assert [HYPERFLOW_URL_BASE + selected_hyperflow,
-                    str(destinations[selected_hyperflow]), "3700"] in [
-                line.split("\t") for line in lines
-            ], f"{label}: HyperFlow manifest URL or size floor drifted"
-            if key in ("false", "bf16"):
-                assert destinations.get(HYPERFLOW_NODE_WEIGHT) == (
-                    tmp / f"models-{slug}" / "hyperflow" / HYPERFLOW_NODE_WEIGHT
-                ), f"{label}: node weight missing from models/hyperflow"
-                assert [HYPERFLOW_NODE_URL,
-                        str(destinations[HYPERFLOW_NODE_WEIGHT]), "3700"] in [
-                    line.split("\t") for line in lines
-                ], f"{label}: node weight URL or size floor drifted"
-            else:
-                assert HYPERFLOW_NODE_WEIGHT not in downloaded, (
-                    f"{label}: node weight must only queue for full BF16")
-            expected_upscaler_path = (
-                tmp / f"models-{slug}" / "latent_upscale_models" /
-                LATENT_UPSCALER
-            )
-            assert destinations.get(LATENT_UPSCALER) == expected_upscaler_path, (
-                f"{label}: latent upscaler destination is "
-                f"{destinations.get(LATENT_UPSCALER)}, expected "
-                f"{expected_upscaler_path}"
-            )
-            assert [LATENT_UPSCALER_URL, str(expected_upscaler_path)] in [
-                line.split("\t")[:2] for line in lines
-            ], (
-                f"{label}: upscaler manifest must use the versioned upstream URL"
-            )
-            for workflow in (dst / "MiniMax H3" / "Upscaling").glob("*.json"):
-                content = workflow.read_text()
-                assert LATENT_UPSCALER in content, f"{workflow.name}: new weight missing"
-                assert "minimax_h3_latent_upscaler_3d_fp16.safetensors" not in content, (
-                    f"{workflow.name}: retired upscaler filename survived provisioning"
-                )
             if warning:
                 assert warning in proc.stdout, (
                     f"{label}: expected warning {warning!r}, got:\n{proc.stdout}"
                 )
-            print(f"✅ {label} -> {key}: workflows and manifest agree on "
-                  f"{len(wanted)} files, all {len(TURBO_LORAS)} turbo LoRAs "
-                  f"and the latent upscaler queued")
+            assert IGNORED_LORA not in proc.stdout, (
+                f"{label}: ignored NSFW LoRA was reported as user-supplied:\n"
+                f"{proc.stdout}"
+            )
+            print(f"✅ {label} -> {key}: only the cached workflow and its "
+                  f"{len(expected)} models were queued")
 
     # Fallback and aliases must be byte-identical in URL terms, not merely
     # "some default-ish" sets.

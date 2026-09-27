@@ -5,7 +5,10 @@ soundtrack in one pass. Dialogue, footsteps, music and room tone come
 out of the same generation, with nothing to sync afterwards. Clips are
 768p, 4 to 15 seconds, at 24 fps.
 
-It comes with fifteen workflows. These are the six standard workflows:
+With `download_minimax_h3` set, it installs one workflow,
+`minimaxH3ReferenceToVideo8_v10_cached`, and downloads only the models that
+graph loads. The other MiniMax graphs stay in the template repository and
+are not copied onto the pod. These are the six standard workflows:
 
 - MiniMax - T2V - Custom Prompt: text to video and audio.
 - MiniMax - T2V - Auto Prompt: same, but writes the full H3 prompt for
@@ -105,7 +108,7 @@ you deploy, or edit the variables on this pod and restart it.
 
 | Variable | Default | What it does |
 |---|---|---|
-| download_minimax_h3 | unset | Set to true to download the models and install the workflows. Leave it unset and the pod boots with no models. |
+| download_minimax_h3 | unset | Set to true to download the reference-to-video models and install that workflow. Leave it unset and the pod boots with no models. |
 | minimax_quant | int8 | Which build to download: int8, fp8, nvfp4, or false for full bf16. See below. |
 | LLM_KEY | empty | Your OpenRouter key, for the Auto Prompt workflows. |
 
@@ -119,7 +122,7 @@ rents and the workflows are already set up for it.
 | int8 (default) | The int8 model. Works well everywhere. |
 | fp8 | The fp8 model. Native on 4090, L40, H100, H200 and RTX 50xx cards. Slower than int8 on older cards. |
 | nvfp4 | Same files as fp8. NVFP4 only accelerates on Blackwell cards (RTX 50xx); other GPUs fall back. |
-| false | The full bf16 FL2VA and Ref2VA models. Needs a much larger network volume. |
+| false | The full bf16 Ref2VA model. Needs a larger network volume than int8. |
 
 The text encoder is the same int8 build whichever quant you pick. Only
 the quant you ask for is downloaded, and the workflows are pointed at
@@ -131,8 +134,9 @@ bf16 set needs at least 180 GB; 200 GB leaves comfortable room for outputs.
 
 ## Turbo LoRAs
 
-The T2V, I2V and R2V workflows sample through a distilled turbo LoRA
-from lightx2v. The template downloads the three builds listed below.
+The reference-to-video workflow samples through the Ref2V turbo LoRA from
+lightx2v. That is the only Turbo LoRA this template downloads. The FL2V
+builds below are not downloaded.
 
 | LoRA in the dropdown | Steps | Strength | Sigma shift |
 |---|---|---|---|
@@ -140,19 +144,14 @@ from lightx2v. The template downloads the three builds listed below.
 | minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16 | 8 | 1.0 | 6 video / 3 audio |
 | minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16 | 8 | 1.0 | 6 video / 3 audio |
 
-The five curated T2V, I2V and R2V workflows keep their tuned 8-step 768p
-defaults. The 4-step v1.2 build is downloaded as a manual T2V/I2V option,
-but no bundled workflow selects it. LightX2V has not yet added v1.2 to its
-published settings table, so confirm its strength and shift guidance before
-switching.
+The installed workflow uses the Ref2V 8-step LoRA at full strength. The
+FL2V rows are reference only. They are not downloaded.
 
 ## Latent upscaling
 
 The MiniMax H3 Latent Upscaler node pack is installed on this template.
-With download_minimax_h3 set to true, its 3D fp16 weight is downloaded
-to models/latent_upscale_models. Add “Minimax H3 Latent Upscaler (3D)”
-to your graph to use it. Five ready-to-run upscaling workflows are in the
-MiniMax H3/Upscaling folder; the six standard workflows remain unchanged.
+Its 3D fp16 weight is not downloaded. The upscaling workflows are not
+installed on the pod.
 
 This upscales MiniMax's latent before decoding. It can shorten the
 high-resolution part of a workflow, but it does not reduce peak VRAM.

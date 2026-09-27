@@ -2,16 +2,13 @@
   "template_repo": "https://github.com/Hearmeman24/comfyui-minimax.git",
   "branch": "master",
   "provisioning_mode": "walk",
+  "auto_download": [
+    "HMNSFW-AIO-V2.5.safetensors"
+  ],
   "flags": {
     "download_minimax_h3": {
-      "folders": [
-        "MiniMax H3"
-      ],
-      "extra_models": [
-        "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
-        "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
-        "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
-        "minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors"
+      "workflows": [
+        "minimaxH3ReferenceToVideo8_v10_cached.json"
       ]
     },
     "download_viggle_animate": {
@@ -35,35 +32,23 @@
       ],
       "profiles": {
         "int8": {
-          "fl2va": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
           "ref2va": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
-          "hyperflow": "minimax_h3_hyperflow_8step_v1.0_comfyui_pruned_bf16.safetensors",
           "text_encoder": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
         },
         "fp8": {
-          "fl2va": "minimax_h3_fl2va_pruned_fp8_scaled.safetensors",
           "ref2va": "minimax_h3_ref2va_pruned_fp8_scaled.safetensors",
-          "hyperflow": "minimax_h3_hyperflow_8step_v1.0_comfyui_pruned_bf16.safetensors",
           "text_encoder": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
         },
         "nvfp4": {
-          "fl2va": "minimax_h3_fl2va_pruned_fp8_scaled.safetensors",
           "ref2va": "minimax_h3_ref2va_pruned_fp8_scaled.safetensors",
-          "hyperflow": "minimax_h3_hyperflow_8step_v1.0_comfyui_pruned_bf16.safetensors",
           "text_encoder": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
         },
         "false": {
-          "fl2va": "minimax_h3_fl2va_bf16.safetensors",
           "ref2va": "minimax_h3_ref2va_bf16.safetensors",
-          "hyperflow": "minimax_h3_hyperflow_8step_v1.0_comfyui_bf16.safetensors",
-          "hyperflow_node": "custom_node_hyperflow_8step_v1.0_comfyui.safetensors",
           "text_encoder": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
         },
         "bf16": {
-          "fl2va": "minimax_h3_fl2va_bf16.safetensors",
           "ref2va": "minimax_h3_ref2va_bf16.safetensors",
-          "hyperflow": "minimax_h3_hyperflow_8step_v1.0_comfyui_bf16.safetensors",
-          "hyperflow_node": "custom_node_hyperflow_8step_v1.0_comfyui.safetensors",
           "text_encoder": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
         }
       }
